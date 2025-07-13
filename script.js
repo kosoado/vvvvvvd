@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM要素の取得 ---
     const modeSelection = document.getElementById('mode-selection');
     const etoJBtn = document.getElementById('eto-j-btn');
     const jtoEBtn = document.getElementById('jto-e-btn');
@@ -16,53 +17,60 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalText = document.getElementById('total');
     const restartBtn = document.getElementById('restart-btn');
 
-    let words = [];
+    // --- グローバル変数 ---
+    let allWords = [];
+    let quizQueue = [];
     let currentMode = '';
     let currentIndex = 0;
     let score = 0;
-    let shuffledWords = [];
+    const QUIZ_LENGTH = 10;       // 1回のクイズの問題数
+    const MAX_ATTEMPTS = 3;       // 1単語あたりの最大出題回数
 
-    // JSONファイルから単語データを読み込む
+    // --- イベントリスナー ---
+    etoJBtn.addEventListener('click', () => startGame('eto-j'));
+    jtoEBtn.addEventListener('click', () => startGame('jto-e'));
+    submitBtn.addEventListener('click', checkAnswer);
+    answerInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !submitBtn.classList.contains('hidden')) {
+            checkAnswer();
+        }
+    });
+    nextBtn.addEventListener('click', nextQuestion);
+    restartBtn.addEventListener('click', () => {
+        resultArea.classList.add('hidden');
+        modeSelection.classList.remove('hidden');
+    });
+
+    // --- 初期化処理 ---
     fetch('words.json')
         .then(response => response.json())
         .then(data => {
-            words = data;
+            allWords = data;
         })
         .catch(error => {
             console.error('単語データの読み込みに失敗しました:', error);
             alert('単語データの読み込みに失敗しました。');
         });
 
-    // モード選択
-    etoJBtn.addEventListener('click', () => startGame('eto-j'));
-    jtoEBtn.addEventListener('click', () => startGame('jto-e'));
-
-    // 解答ボタンの処理
-    submitBtn.addEventListener('click', checkAnswer);
-    answerInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            checkAnswer();
-        }
-    });
-
-    // 次へボタンの処理
-    nextBtn.addEventListener('click', nextQuestion);
-    
-    // やり直しボタンの処理
-    restartBtn.addEventListener('click', () => {
-        resultArea.classList.add('hidden');
-        modeSelection.classList.remove('hidden');
-    });
-
+    /**
+     * ゲームを開始する関数
+     * @param {string} mode 'eto-j' または 'jto-e'
+     */
     function startGame(mode) {
-        if (words.length === 0) {
+        if (allWords.length === 0) {
             alert('単語データがまだ準備できていません。');
             return;
         }
         currentMode = mode;
         currentIndex = 0;
         score = 0;
-        shuffledWords = [...words].sort(() => Math.random() - 0.5); // 単語をシャッフル
+        
+        // 全単語をシャッフルし、先頭から10問を取得
+        const shuffled = [...allWords].sort(() => Math.random() - 0.5);
+        quizQueue = shuffled.slice(0, QUIZ_LENGTH).map(word => ({
+            ...word,
+            attempts: 1 // 各単語の挑戦回数を記録
+        }));
 
         modeSelection.classList.add('hidden');
         quizArea.classList.remove('hidden');
@@ -70,19 +78,22 @@ document.addEventListener('DOMContentLoaded', () => {
         displayQuestion();
     }
 
+    /**
+     * 次の問題を表示する関数
+     */
     function displayQuestion() {
-        if (currentIndex >= shuffledWords.length) {
+        // クイズキューの全問題が終了したら結果表示
+        if (currentIndex >= quizQueue.length) {
             showResult();
             return;
         }
 
-        progressText.textContent = `${currentIndex + 1} / ${shuffledWords.length}`;
-        const currentWord = shuffledWords[currentIndex];
+        progressText.textContent = `問題 ${currentIndex + 1} / ${quizQueue.length}`;
+        const currentWord = quizQueue[currentIndex];
 
         if (currentMode === 'eto-j') {
             questionText.textContent = currentWord.english;
         } else {
-            // 日本語訳に複数ある場合は最初のものを表示
             questionText.textContent = currentWord.japanese.split(/,|、/)[0];
         }
 
@@ -94,13 +105,17 @@ document.addEventListener('DOMContentLoaded', () => {
         answerInput.focus();
     }
 
+    /**
+     * ユーザーの解答をチェックする関数
+     */
     function checkAnswer() {
         const userAnswer = answerInput.value.trim().toLowerCase();
         if (!userAnswer) return;
 
-        const currentWord = shuffledWords[currentIndex];
+        const currentWord = quizQueue[currentIndex];
         let isCorrect = false;
 
+        // 正誤判定
         if (currentMode === 'eto-j') {
             const correctAnswers = currentWord.japanese.toLowerCase().split(/,|、/);
             isCorrect = correctAnswers.some(ans => ans.trim() === userAnswer);
@@ -108,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isCorrect = userAnswer === currentWord.english.toLowerCase();
         }
 
+        // ボタンの状態を更新
         answerInput.disabled = true;
         submitBtn.classList.add('hidden');
         nextBtn.classList.remove('hidden');
@@ -116,23 +132,38 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isCorrect) {
             resultText.textContent = '正解！ ✅';
             resultText.className = 'correct';
-            score++;
+            // 最初の挑戦で正解した場合のみスコアを加算
+            if (currentWord.attempts === 1) {
+                score++;
+            }
         } else {
             const correctAnswer = (currentMode === 'eto-j') ? currentWord.japanese : currentWord.english;
             resultText.textContent = `不正解... ❌ 正解は: ${correctAnswer}`;
             resultText.className = 'incorrect';
+
+            // 挑戦回数が上限未満なら、クイズの最後にもう一度追加
+            if (currentWord.attempts < MAX_ATTEMPTS) {
+                const nextAttemptWord = { ...currentWord, attempts: currentWord.attempts + 1 };
+                quizQueue.push(nextAttemptWord);
+            }
         }
     }
 
+    /**
+     * 次の問題へ進む
+     */
     function nextQuestion() {
         currentIndex++;
         displayQuestion();
     }
 
+    /**
+     * 最終結果を表示する
+     */
     function showResult() {
         quizArea.classList.add('hidden');
         resultArea.classList.remove('hidden');
         scoreText.textContent = score;
-        totalText.textContent = shuffledWords.length;
+        totalText.textContent = QUIZ_LENGTH; // スコアは最初の10問に対して表示
     }
 });
